@@ -26,7 +26,7 @@ const requiredEnvs = [
 
 for (const env of requiredEnvs) {
   if (!process.env[env]) {
-    console.error(Missing required env: ${env});
+    console.error(`Missing required env: ${env}`);
     process.exit(1);
   }
 }
@@ -84,8 +84,8 @@ async function startServer() {
       socket.on('authenticate', (userId) => {
         activeConnections[userId] = activeConnections[userId] || [];
         activeConnections[userId].push(socket.id);
-        console.log(User ${userId} authenticated);
-        socket.join(webhook_${userId});
+        console.log(`User ${userId} authenticated`);
+        socket.join(`webhook_${userId}`);
       });
 
       socket.on('disconnect', () => {
@@ -116,7 +116,7 @@ async function startServer() {
           try {
             const user = await User.findById(msg.userId).lean();
             if (!user) {
-              console.error(User not found for message ${msg._id});
+              console.error(`User not found for message ${msg._id}`);
               continue;
             }
 
@@ -133,13 +133,13 @@ async function startServer() {
             });
 
             await Message.findByIdAndUpdate(msg._id, { status: 'SENT' });
-            console.log(Processed message ${msg._id});
+            console.log(`Processed message ${msg._id}`);
           } catch (err) {
-            console.error(Error processing message ${msg._id}:, err.message);
+            console.error(`Error processing message ${msg._id}:`, err.message);
           }
         }
 
-        console.log(Cron job completed in ${Date.now() - startTime}ms, processed ${messages.length} messages);
+        console.log(`Cron job completed in ${Date.now() - startTime}ms, processed ${messages.length} messages`);
       } catch (err) {
         console.error('Cron job error:', err.message);
       }
@@ -147,7 +147,7 @@ async function startServer() {
 
     const PORT = process.env.PORT || 5000;
     server.listen(PORT, () => {
-      console.log(Server running on port ${PORT});
+      console.log(`Server running on port ${PORT}`);
     });
   } catch (err) {
     console.error('Failed to start server:', err);
@@ -165,5 +165,5 @@ app.use((req, res, next) => {
 // Global error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(500).send('Something went wrong on the server. Please try again later!');
+  res.status(500).send('Something went wrong on the server. Please try again later!');
 });
