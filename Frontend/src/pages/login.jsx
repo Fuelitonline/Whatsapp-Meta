@@ -1,10 +1,10 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
-import CheckCircle from '@mui/icons-material/CheckCircle';
-import ArrowForward from '@mui/icons-material/ArrowForward';
-import Header from '../component/webHeader';
-import Footer from '../component/webFooter';
+import CheckCircle from "@mui/icons-material/CheckCircle";
+import ArrowForward from "@mui/icons-material/ArrowForward";
+import Header from "../component/webHeader";
+import Footer from "../component/webFooter";
 
 const Login = () => {
   const [fbLoaded, setFbLoaded] = useState(false);
@@ -12,67 +12,17 @@ const Login = () => {
   const [error, setError] = useState(null);
   const navigate = useNavigate();
 
-  // Load Facebook SDK and check login status
-  useEffect(() => {
-    if (document.getElementById("facebook-jssdk")) {
-      if (window.FB) {
-        setFbLoaded(true);
-        checkLoginStatus();
-      }
-      return;
-    }
-
-    window.fbAsyncInit = function () {
-      window.FB.init({
-        appId: import.meta.env.VITE_FACEBOOK_APP_ID,
-        cookie: true,
-        xfbml: true,
-        version: import.meta.env.VITE_WHATSAPP_API_VERSION || "v23.0",
-      });
-      window.FB.AppEvents.logPageView();
-      setFbLoaded(true);
-      checkLoginStatus();
-    };
-
-    (function (d, s, id) {
-      var js,
-        fjs = d.getElementsByTagName(s)[0];
-      if (d.getElementById(id)) {
-        return;
-      }
-      js = d.createElement(s);
-      js.id = id;
-      js.src = "https://connect.facebook.net/en_US/sdk.js";
-      js.onerror = () => {
-        setError("Failed to load Facebook SDK. Please check your network.");
-        setFbLoaded(false);
-      };
-      fjs.parentNode.insertBefore(js, fjs);
-    })(document, "script", "facebook-jssdk");
-  }, []);
-
-  // Check Facebook login status
-  const checkLoginStatus = () => {
-    if (!window.FB) {
-      setError("Facebook SDK not loaded.");
-      return;
-    }
-
-    window.FB.getLoginStatus((response) => {
-      statusChangeCallback(response);
-    });
-  };
-
-  // Handle login status response
-  const statusChangeCallback = async (response) => {
+  /* -------------------------------------------------------------------------- */
+  /*  Handle login status response (memoized)                                   */
+  /* -------------------------------------------------------------------------- */
+  const statusChangeCallback = useCallback(async (response) => {
     console.log("FB.getLoginStatus response:", response);
 
     if (response.status === "connected" && response.authResponse?.accessToken) {
-      // User is logged into Facebook and the app
       try {
         setIsLoggingIn(true);
         const apiResponse = await axios.post(
-          `${import.meta.env.VITE_API_URL}/api/auth/login`,   
+          `${import.meta.env.VITE_API_URL}/api/auth/login`,
           { accessToken: response.authResponse.accessToken },
           { withCredentials: true }
         );
@@ -93,42 +43,30 @@ const Login = () => {
         setIsLoggingIn(false);
       }
     } else if (response.status === "not_authorized" || response.status === "unknown") {
-      // User is not logged into the app or Facebook
       console.log("User not logged in or not authorized:", response.status);
-      // Show the login button (handled by XFBML)
     } else {
       setError("Unknown login status. Please try again.");
     }
-  };
+  }, [navigate]);
 
-  // Listen for WhatsApp signup response
-  useEffect(() => {
-    const handleMessage = (event) => {
-      if (!event.origin.endsWith("facebook.com")) return;
+  /* -------------------------------------------------------------------------- */
+  /*  Check Facebook login status (memoized)                                    */
+  /* -------------------------------------------------------------------------- */
+  const checkLoginStatus = useCallback(() => {
+    if (!window.FB) {
+      setError("Facebook SDK not loaded.");
+      return;
+    }
 
-      try {
-        if (typeof event.data !== "string") return;
+    window.FB.getLoginStatus((response) => {
+      statusChangeCallback(response);
+    });
+  }, [statusChangeCallback]); // Now includes the dependency
 
-        const trimmed = event.data.trim();
-        if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return;
-
-        const data = JSON.parse(trimmed);
-
-        if (data.type === "WA_EMBEDDED_SIGNUP" && data.code) {
-          console.log("WA_EMBEDDED_SIGNUP event:", data);
-          fbLoginCallback({ authResponse: { code: data.code } });
-        }
-      } catch (err) {
-        console.error("Message event error:", err.message);
-      }
-    };
-
-    window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
-  }, []);
-
-  // Handle FB login response (for WhatsApp Embedded Signup)
-  const fbLoginCallback = async (response) => {
+  /* -------------------------------------------------------------------------- */
+  /*  Handle FB login response (WhatsApp Embedded Signup) - memoized            */
+  /* -------------------------------------------------------------------------- */
+  const fbLoginCallback = useCallback(async (response) => {
     setIsLoggingIn(false);
 
     if (response.authResponse?.code) {
@@ -156,9 +94,77 @@ const Login = () => {
       console.log("Facebook login response:", response);
       setError("Facebook login was cancelled or failed.");
     }
-  };
+  }, [navigate]);
 
-  // Function for onlogin attribute
+  /* -------------------------------------------------------------------------- */
+  /*  Load Facebook SDK + check login status                                    */
+  /* -------------------------------------------------------------------------- */
+  useEffect(() => {
+    if (document.getElementById("facebook-jssdk")) {
+      if (window.FB) {
+        setFbLoaded(true);
+        checkLoginStatus();
+      }
+      return;
+    }
+
+    window.fbAsyncInit = function () {
+      window.FB.init({
+        appId: import.meta.env.VITE_FACEBOOK_APP_ID,
+        cookie: true,
+        xfbml: true,
+        version: import.meta.env.VITE_WHATSAPP_API_VERSION || "v23.0",
+      });
+      window.FB.AppEvents.logPageView();
+      setFbLoaded(true);
+      checkLoginStatus();
+    };
+
+    (function (d, s, id) {
+      const fjs = d.getElementsByTagName(s)[0];
+      if (d.getElementById(id)) return;
+      const js = d.createElement(s);
+      js.id = id;
+      js.src = "https://connect.facebook.net/en_US/sdk.js";
+      js.onerror = () => {
+        setError("Failed to load Facebook SDK. Please check your network.");
+        setFbLoaded(false);
+      };
+      fjs.parentNode.insertBefore(js, fjs);
+    })(document, "script", "facebook-jssdk");
+  }, [checkLoginStatus]);
+
+  /* -------------------------------------------------------------------------- */
+  /*  Listen for WhatsApp embedded-signup postMessage                           */
+  /* -------------------------------------------------------------------------- */
+  useEffect(() => {
+    const handleMessage = (event) => {
+      if (!event.origin.endsWith("facebook.com")) return;
+
+      try {
+        if (typeof event.data !== "string") return;
+
+        const trimmed = event.data.trim();
+        if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return;
+
+        const data = JSON.parse(trimmed);
+
+        if (data.type === "WA_EMBEDDED_SIGNUP" && data.code) {
+          console.log("WA_EMBEDDED_SIGNUP event:", data);
+          fbLoginCallback({ authResponse: { code: data.code } });
+        }
+      } catch (err) {
+        console.error("Message event error:", err.message);
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [fbLoginCallback]);
+
+  /* -------------------------------------------------------------------------- */
+  /*  onlogin attribute helper (XFBML)                                          */
+  /* -------------------------------------------------------------------------- */
   window.checkLoginState = function () {
     if (!window.FB) {
       setError("Facebook SDK not loaded.");
@@ -170,6 +176,37 @@ const Login = () => {
     });
   };
 
+  /* -------------------------------------------------------------------------- */
+  /*  Manual WhatsApp Signup (fallback)                                         */
+  /* -------------------------------------------------------------------------- */
+  const launchWhatsAppSignup = () => {
+    if (!window.FB) {
+      setError("Facebook SDK not loaded yet. Please wait...");
+      return;
+    }
+
+    setIsLoggingIn(true);
+
+    window.FB.login(
+      (response) => {
+        fbLoginCallback(response);
+      },
+      {
+        config_id: import.meta.env.VITE_FACEBOOK_CONFIG_ID,
+        response_type: "code",
+        override_default_response_type: true,
+        extras: {
+          setup: {},
+          featureType: "WHATSAPP",
+          sessionInfoVersion: "3",
+        },
+      }
+    );
+  };
+
+  /* -------------------------------------------------------------------------- */
+  /*  Render                                                                    */
+  /* -------------------------------------------------------------------------- */
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
       <Header />
@@ -179,8 +216,12 @@ const Login = () => {
             {/* Left Panel - Login Form */}
             <div className="p-8 md:col-span-3">
               <div className="mb-8">
-                <h2 className="text-2xl font-bold text-gray-900">Sign In to FIO's WABM</h2>
-                <p className="mt-2 text-gray-600">Access your FIO's WABM dashboard to manage WhatsApp Business API.</p>
+                <h2 className="text-2xl font-bold text-gray-900">
+                  Sign In to FIO's WABM
+                </h2>
+                <p className="mt-2 text-gray-600">
+                  Access your FIO's WABM dashboard to manage WhatsApp Business API.
+                </p>
               </div>
 
               {/* Error Message */}
@@ -190,9 +231,10 @@ const Login = () => {
                 </div>
               )}
 
-              {/* Facebook Login Button */}
+              {/* Facebook Login Button (XFBML) */}
               <div
-                className={`fb-login-button ${!fbLoaded || isLoggingIn ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`fb-login-button ${!fbLoaded || isLoggingIn ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
                 data-size="large"
                 data-button-type="continue_with"
                 data-layout="rounded"
@@ -210,32 +252,81 @@ const Login = () => {
                   sessionInfoVersion: "3",
                 })}
               ></div>
-              <p className="text-sm text-gray-600 mt-4 mb-8">
-                Use your Meta account to quickly sign in and manage your WhatsApp Business API.
+
+              <p className="text-sm text-gray-600 mt-4 mb-4">
+                Use your Meta account to quickly sign in and manage your WhatsApp
+                Business API.
               </p>
+
+              {/* Fallback Manual Button */}
+              {fbLoaded && (
+                <button
+                  onClick={launchWhatsAppSignup}
+                  className="w-full bg-[#1877f2] text-white font-bold py-3 px-6 rounded-lg hover:bg-[#166fe5] transition-colors flex items-center justify-center disabled:opacity-50"
+                  disabled={isLoggingIn}
+                >
+                  {isLoggingIn ? (
+                    <>
+                      <svg
+                        className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
+                      </svg>
+                      Signing in...
+                    </>
+                  ) : (
+                    "Continue with Facebook"
+                  )}
+                </button>
+              )}
             </div>
 
             {/* Right Panel - Image and Info */}
             <div className="hidden md:block md:col-span-2 bg-blue-50 p-8">
               <div className="h-full flex flex-col justify-between">
                 <div>
-                  <h3 className="text-xl font-semibold text-gray-900 mb-4">Benefits of Signing In</h3>
+                  <h3 className="text-xl font-semibold text-gray-900 mb-4">
+                    Benefits of Signing In
+                  </h3>
                   <ul className="space-y-4">
                     <li className="flex items-start">
                       <CheckCircle className="text-blue-600 mr-2 mt-0.5" />
-                      <span className="text-gray-700">Full access to FIO's WABM features</span>
+                      <span className="text-gray-700">
+                        Full access to FIO's WABM features
+                      </span>
                     </li>
                     <li className="flex items-start">
                       <CheckCircle className="text-blue-600 mr-2 mt-0.5" />
-                      <span className="text-gray-700">Comprehensive analytics dashboard</span>
+                      <span className="text-gray-700">
+                        Comprehensive analytics dashboard
+                      </span>
                     </li>
                     <li className="flex items-start">
                       <CheckCircle className="text-blue-600 mr-2 mt-0.5" />
-                      <span className="text-gray-700">Automated message templates and workflows</span>
+                      <span className="text-gray-700">
+                        Automated message templates and workflows
+                      </span>
                     </li>
                     <li className="flex items-start">
                       <CheckCircle className="text-blue-600 mr-2 mt-0.5" />
-                      <span className="text-gray-700">Seamless integration with your business tools</span>
+                      <span className="text-gray-700">
+                        Seamless integration with your business tools
+                      </span>
                     </li>
                   </ul>
                 </div>
@@ -249,10 +340,14 @@ const Login = () => {
                 </div>
 
                 <div className="mt-8">
-                  <p className="text-sm text-gray-600">Need help with login?</p>
+                  <p className="text-sm text-gray-600">
+                    Need help with login?
+                  </p>
                   <a
                     href="https://developers.facebook.com/docs/whatsapp/embedded-signup"
                     className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-500"
+                    target="_blank"
+                    rel="noopener noreferrer"
                   >
                     View our setup guide <ArrowForward className="ml-1 text-sm" />
                   </a>
