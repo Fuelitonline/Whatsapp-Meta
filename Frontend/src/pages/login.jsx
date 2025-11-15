@@ -1,8 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
-import CheckCircle from "@mui/icons-material/CheckCircle";
-import ArrowForward from "@mui/icons-material/ArrowForward";
 import Header from "../component/webHeader";
 import Footer from "../component/webFooter";
 
@@ -13,41 +11,20 @@ const Login = () => {
   const navigate = useNavigate();
 
   // --------------------------------------------------------------
-  //  Memoized API helpers
+  //  Exchange Code for Token
   // --------------------------------------------------------------
-  const exchangeAccessToken = useCallback(
-    async (accessToken) => {
-      try {
-        setIsLoggingIn(true);
-        const { data } = await axios.post(
-          `${import.meta.env.VITE_API_URL}/api/auth/login`,
-          { accessToken },
-          { withCredentials: true }
-        );
-        if (data.success) {
-          localStorage.setItem("token", data.token);
-          navigate("/dashboard");
-        } else {
-          setError(data.error || "Login failed");
-        }
-      } catch (e) {
-        setError(e.response?.data?.error || "Network error");
-      } finally {
-        setIsLoggingIn(false);
-      }
-    },
-    [navigate]
-  );
-
   const exchangeCode = useCallback(
     async (code) => {
       try {
         setIsLoggingIn(true);
+        setError(null);
+
         const { data } = await axios.post(
           `${import.meta.env.VITE_API_URL}/api/auth/login`,
           { code },
           { withCredentials: true }
         );
+
         if (data.success) {
           localStorage.setItem("token", data.token);
           navigate("/dashboard");
@@ -55,7 +32,7 @@ const Login = () => {
           setError(data.error || "Login failed");
         }
       } catch (e) {
-        setError(e.response?.data?.error || "Network error");
+        setError(e.response?.data?.error || "Network error. Please try again.");
       } finally {
         setIsLoggingIn(false);
       }
@@ -64,39 +41,39 @@ const Login = () => {
   );
 
   // --------------------------------------------------------------
-  //  FB callbacks
+  //  postMessage Listener (Receives `code` from Embedded Signup)
   // --------------------------------------------------------------
-  const statusChangeCallback = useCallback(
-    (response) => {
-      console.log("statusChangeCallback →", response);
-      if (response.status === "connected" && response.authResponse?.accessToken) {
-        exchangeAccessToken(response.authResponse.accessToken);
-      }
-    },
-    [exchangeAccessToken]
-  );
+  useEffect(() => {
+    const handler = (e) => {
+      if (!e.origin.endsWith("facebook.com") && !e.origin.endsWith("fb.com")) return;
 
-  const fbLoginCallback = useCallback(
-    (response) => {
-      setIsLoggingIn(false);
-      if (response.authResponse?.code) {
-        exchangeCode(response.authResponse.code);
-      } else {
-        setError("Login cancelled or failed.");
+      const payload = e.data;
+      if (typeof payload !== "string") return;
+
+      const trimmed = payload.trim();
+      if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return;
+
+      try {
+        const data = JSON.parse(trimmed);
+        if (data.type === "WA_EMBEDDED_SIGNUP" && data.code) {
+          exchangeCode(data.code);
+        }
+      } catch {
+        // Ignore malformed messages
       }
-    },
-    [exchangeCode]
-  );
+    };
+
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [exchangeCode]);
 
   // --------------------------------------------------------------
-  //  Load FB SDK + XFBML + getLoginStatus
+  //  Load Facebook SDK
   // --------------------------------------------------------------
   useEffect(() => {
     if (document.getElementById("facebook-jssdk")) {
       if (window.FB) {
         setFbLoaded(true);
-        window.FB.XFBML.parse();
-        window.FB.getLoginStatus(statusChangeCallback);
       }
       return;
     }
@@ -105,13 +82,10 @@ const Login = () => {
       window.FB.init({
         appId: import.meta.env.VITE_FACEBOOK_APP_ID,
         cookie: true,
-        xfbml: true,
+        xfbml: false, // We don't use XFBML
         version: import.meta.env.VITE_WHATSAPP_API_VERSION || "v23.0",
       });
-      window.FB.AppEvents.logPageView();
       setFbLoaded(true);
-      window.FB.XFBML.parse();
-      window.FB.getLoginStatus(statusChangeCallback);
     };
 
     (function (d, s, id) {
@@ -123,58 +97,27 @@ const Login = () => {
       js.onerror = () => setError("Failed to load Facebook SDK");
       fjs.parentNode.insertBefore(js, fjs);
     })(document, "script", "facebook-jssdk");
-  }, [statusChangeCallback]);
+  }, []);
 
   // --------------------------------------------------------------
-  //  postMessage listener – ONLY parse real JSON
-  // --------------------------------------------------------------
-  useEffect(() => {
-    const handler = (e) => {
-      if (!e.origin.endsWith("facebook.com")) return;
-
-      const payload = e.data;
-      if (typeof payload !== "string") return;
-
-      const trimmed = payload.trim();
-      if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return;
-
-      try {
-        const data = JSON.parse(trimmed);
-        if (data.type === "WA_EMBEDDED_SIGNUP" && data.code) {
-          fbLoginCallback({ authResponse: { code: data.code } });
-        }
-      } catch {
-        // ignore malformed messages
-      }
-    };
-
-    window.addEventListener("message", handler);
-    return () => window.removeEventListener("message", handler);
-  }, [fbLoginCallback]);
-
-  // --------------------------------------------------------------
-  //  XFBML onlogin helper
-  // --------------------------------------------------------------
-  window.checkLoginState = () => {
-    if (!window.FB) return setError("SDK not ready");
-    setIsLoggingIn(true);
-    window.FB.getLoginStatus(statusChangeCallback);
-  };
-
-  // --------------------------------------------------------------
-  //  Manual fallback button
+  //  Manual Login with Embedded Signup
   // --------------------------------------------------------------
   const launchWhatsAppSignup = () => {
-    if (!window.FB) return setError("SDK not ready");
+    if (!window.FB) {
+      setError("Facebook SDK not loaded");
+      return;
+    }
+
     setIsLoggingIn(true);
+    setError(null);
+
     window.FB.login(
-      fbLoginCallback,
+      () => { }, // Callback not used — we rely on postMessage
       {
         config_id: import.meta.env.VITE_FACEBOOK_CONFIG_ID,
         response_type: "code",
         override_default_response_type: true,
         extras: {
-          setup: {},
           featureType: "WHATSAPP",
           sessionInfoVersion: "3",
         },
@@ -185,8 +128,6 @@ const Login = () => {
   // --------------------------------------------------------------
   //  Render
   // --------------------------------------------------------------
-  const showFbButton = fbLoaded && !isLoggingIn;
-
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
       <Header />
@@ -205,43 +146,17 @@ const Login = () => {
               </div>
 
               {error && (
-                <div className="mb-6 p-4 bg-red-100 text-red-700 rounded-md">
+                <div className="mb-6 p-4 bg-red-100 text-red-700 rounded-md text-sm">
                   {error}
                 </div>
               )}
 
-              {/* XFBML BUTTON */}
-              {showFbButton && (
-                <div
-                  className="fb-login-button"
-                  data-size="large"
-                  data-button-type="continue_with"
-                  data-layout="rounded"
-                  data-auto-logout-link="false"
-                  data-use-continue-as="true"
-                  data-scope="whatsapp_business_management,whatsapp_business_messaging"
-                  data-onlogin="checkLoginState"
-                  data-config-id={import.meta.env.VITE_FACEBOOK_CONFIG_ID}
-                  data-response-type="code"
-                  data-override-default-response-type="true"
-                  data-extras={JSON.stringify({
-                    setup: {},
-                    featureType: "WHATSAPP",
-                    sessionInfoVersion: "3",
-                  })}
-                />
-              )}
-
-              <p className="text-sm text-gray-600 mt-4 mb-4">
-                Use your Meta account to sign in.
-              </p>
-
-              {/* FALLBACK MANUAL BUTTON */}
+              {/* Manual Button Only */}
               {fbLoaded && (
                 <button
                   onClick={launchWhatsAppSignup}
                   disabled={isLoggingIn}
-                  className="w-full bg-[#1877f2] text-white font-bold py-3 rounded-lg hover:bg-[#166fe5] flex items-center justify-center disabled:opacity-50"
+                  className="w-full bg-[#1877f2] hover:bg-[#166fe5] text-white font-bold py-3 rounded-lg flex items-center justify-center disabled:opacity-50 transition-colors"
                 >
                   {isLoggingIn ? (
                     <>
@@ -268,10 +183,14 @@ const Login = () => {
                       Signing in…
                     </>
                   ) : (
-                    "Continue with Facebook"
+                    "Continue with WhatsApp Business"
                   )}
                 </button>
               )}
+
+              <p className="text-sm text-gray-600 mt-6">
+                Use your Meta account with WhatsApp Business access.
+              </p>
             </div>
 
             {/* RIGHT */}
@@ -289,7 +208,17 @@ const Login = () => {
                       "Seamless integration with your business tools",
                     ].map((t) => (
                       <li key={t} className="flex items-start">
-                        <CheckCircle className="text-blue-600 mr-2 mt-0.5 flex-shrink-0" />
+                        <svg
+                          className="w-5 h-5 text-blue-600 mr-2 mt-0.5 flex-shrink-0"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
                         <span className="text-gray-700">{t}</span>
                       </li>
                     ))}
@@ -312,7 +241,20 @@ const Login = () => {
                     rel="noopener noreferrer"
                     className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-500"
                   >
-                    View setup guide <ArrowForward className="ml-1 text-sm" />
+                    View setup guide
+                    <svg
+                      className="ml-1 w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
                   </a>
                 </div>
               </div>
