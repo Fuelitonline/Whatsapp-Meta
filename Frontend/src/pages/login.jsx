@@ -170,6 +170,32 @@ const Login = () => {
     });
   };
 
+  // Launch WhatsApp Signup manually (fallback if XFBML doesn't render)
+  const launchWhatsAppSignup = () => {
+    if (!window.FB) {
+      setError("Facebook SDK not loaded yet. Please wait...");
+      return;
+    }
+
+    setIsLoggingIn(true);
+
+    window.FB.login(
+      (response) => {
+        fbLoginCallback(response);
+      },
+      {
+        config_id: import.meta.env.VITE_FACEBOOK_CONFIG_ID,
+        response_type: "code",
+        override_default_response_type: true,
+        extras: {
+          setup: {},
+          featureType: "WHATSAPP",
+          sessionInfoVersion: "3",
+        },
+      }
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
       <Header />
@@ -190,7 +216,7 @@ const Login = () => {
                 </div>
               )}
 
-              {/* Facebook Login Button */}
+              {/* Facebook Login Button (XFBML) */}
               <div
                 className={`fb-login-button ${!fbLoaded || isLoggingIn ? 'opacity-50 cursor-not-allowed' : ''}`}
                 data-size="large"
@@ -210,9 +236,31 @@ const Login = () => {
                   sessionInfoVersion: "3",
                 })}
               ></div>
-              <p className="text-sm text-gray-600 mt-4 mb-8">
+
+              <p className="text-sm text-gray-600 mt-4 mb-4">
                 Use your Meta account to quickly sign in and manage your WhatsApp Business API.
               </p>
+
+              {/* Fallback Manual Button (if XFBML fails to render) */}
+              {fbLoaded && (
+                <button
+                  onClick={launchWhatsAppSignup}
+                  className="w-full bg-[#1877f2] text-white font-bold py-3 px-6 rounded-lg hover:bg-[#166fe5] transition-colors flex items-center justify-center disabled:opacity-50"
+                  disabled={isLoggingIn}
+                >
+                  {isLoggingIn ? (
+                    <>
+                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Signing in...
+                    </>
+                  ) : (
+                    "Continue with Facebook"
+                  )}
+                </button>
+              )}
             </div>
 
             {/* Right Panel - Image and Info */}
@@ -253,6 +301,8 @@ const Login = () => {
                   <a
                     href="https://developers.facebook.com/docs/whatsapp/embedded-signup"
                     className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-500"
+                    target="_blank"
+                    rel="noopener noreferrer"
                   >
                     View our setup guide <ArrowForward className="ml-1 text-sm" />
                   </a>
