@@ -49,6 +49,7 @@ async function startServer() {
           process.env.CLIENT_URL,
           'http://localhost:5173',
           'https://d6ed817b9935.ngrok-free.app',
+          'https://whatsappmeta.vercel.app'
         ],
         methods: ['GET', 'POST'],
         credentials: true,
@@ -127,3 +128,14 @@ async function startServer() {
 }
 
 startServer();
+
+// Custom 404 handler (for unmatched routes)
+app.use((req, res, next) => {
+  res.status(404).send('⚠️ Custom 404 - Page Not Found');
+});
+
+// Global error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);  // Log the error stack for debugging
+  res.status(500).send('❌ Something went wrong on the server. Please try again later!');
+});
