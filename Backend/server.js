@@ -37,7 +37,7 @@ app.use(
     origin: [
       process.env.CLIENT_URL,
       'http://localhost:5173',
-      'https://d6ed817b9935.ngrok-free.app',
+      // 'https://d6ed817b9935.ngrok-free.app',
       'https://whatsappmeta.vercel.app',
     ],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -70,7 +70,7 @@ async function startServer() {
         origin: [
           process.env.CLIENT_URL,
           'http://localhost:5173',
-          'https://d6ed817b9935.ngrok-free.app',
+          // 'https://d6ed817b9935.ngrok-free.app',
           'https://whatsappmeta.vercel.app'
         ],
         methods: ['GET', 'POST'],
