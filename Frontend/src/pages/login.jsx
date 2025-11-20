@@ -10,9 +10,7 @@ const Login = () => {
   const [error, setError] = useState(null);
   const navigate = useNavigate();
 
-  // --------------------------------------------------------------
-  //  Exchange Code for Token
-  // --------------------------------------------------------------
+  // Exchange Code for Token (Main Login Function)
   const exchangeCode = useCallback(
     async (code) => {
       try {
@@ -26,13 +24,22 @@ const Login = () => {
         );
 
         if (data.success) {
+          // Save token & user in localStorage
           localStorage.setItem("token", data.token);
-          navigate("/dashboard");
+          localStorage.setItem("user", JSON.stringify(data.user || {}));
+
+          // Redirect to dashboard
+          navigate("/dashboard", { replace: true });
         } else {
-          setError(data.error || "Login failed");
+          setError(data.error || "Login failed. Please try again.");
         }
       } catch (e) {
-        setError(e.response?.data?.error || "Network error. Please try again.");
+        console.error("Login error:", e);
+        const msg =
+          e.response?.data?.error ||
+          e.message ||
+          "Network error. Please check your connection and try again.";
+        setError(msg);
       } finally {
         setIsLoggingIn(false);
       }
@@ -40,26 +47,23 @@ const Login = () => {
     [navigate]
   );
 
-  // --------------------------------------------------------------
-  //  postMessage Listener (Receives `code` from Embedded Signup)
-  // --------------------------------------------------------------
+  // Listen for postMessage from Facebook Embedded Signup
   useEffect(() => {
     const handler = (e) => {
-      if (!e.origin.endsWith("facebook.com") && !e.origin.endsWith("fb.com")) return;
+      // Only accept messages from Facebook domains
+      if (!e.origin.includes("facebook.com") && !e.origin.includes("fb.com"))
+        return;
 
       const payload = e.data;
       if (typeof payload !== "string") return;
 
-      const trimmed = payload.trim();
-      if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return;
-
       try {
-        const data = JSON.parse(trimmed);
-        if (data.type === "WA_EMBEDDED_SIGNUP" && data.code) {
+        const data = JSON.parse(payload.trim());
+        if (data.type === "WA_EMBEDDED_SIGNUP" && data.event === "FINISH" && data.code) {
           exchangeCode(data.code);
         }
       } catch {
-        // Ignore malformed messages
+        // Ignore malformed messages – no action needed
       }
     };
 
@@ -67,14 +71,10 @@ const Login = () => {
     return () => window.removeEventListener("message", handler);
   }, [exchangeCode]);
 
-  // --------------------------------------------------------------
-  //  Load Facebook SDK
-  // --------------------------------------------------------------
+  // Load Facebook SDK
   useEffect(() => {
     if (document.getElementById("facebook-jssdk")) {
-      if (window.FB) {
-        setFbLoaded(true);
-      }
+      if (window.FB) setFbLoaded(true);
       return;
     }
 
@@ -82,7 +82,7 @@ const Login = () => {
       window.FB.init({
         appId: import.meta.env.VITE_FACEBOOK_APP_ID,
         cookie: true,
-        xfbml: false, // We don't use XFBML
+        xfbml: false,
         version: import.meta.env.VITE_WHATSAPP_API_VERSION || "v23.0",
       });
       setFbLoaded(true);
@@ -99,12 +99,10 @@ const Login = () => {
     })(document, "script", "facebook-jssdk");
   }, []);
 
-  // --------------------------------------------------------------
-  //  Manual Login with Embedded Signup
-  // --------------------------------------------------------------
+  // Trigger WhatsApp Embedded Signup
   const launchWhatsAppSignup = () => {
-    if (!window.FB) {
-      setError("Facebook SDK not loaded");
+    if (!fbLoaded || !window.FB) {
+      setError("Facebook SDK is still loading. Please wait...");
       return;
     }
 
@@ -112,7 +110,7 @@ const Login = () => {
     setError(null);
 
     window.FB.login(
-      () => { }, // Callback not used — we rely on postMessage
+      () => { }, // We don't use the callback — we rely on postMessage
       {
         config_id: import.meta.env.VITE_FACEBOOK_CONFIG_ID,
         response_type: "code",
@@ -125,16 +123,13 @@ const Login = () => {
     );
   };
 
-  // --------------------------------------------------------------
-  //  Render
-  // --------------------------------------------------------------
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
       <Header />
       <main className="flex-1 flex items-center justify-center pt-24 p-6">
         <div className="bg-white rounded-xl shadow-lg overflow-hidden w-full max-w-4xl">
           <div className="md:grid md:grid-cols-5">
-            {/* LEFT */}
+            {/* Left Side - Login Form */}
             <div className="p-8 md:col-span-3">
               <div className="mb-8">
                 <h2 className="text-2xl font-bold text-gray-900">
@@ -145,55 +140,54 @@ const Login = () => {
                 </p>
               </div>
 
+              {/* Error Message */}
               {error && (
-                <div className="mb-6 p-4 bg-red-100 text-red-700 rounded-md text-sm">
+                <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-md text-sm">
                   {error}
                 </div>
               )}
 
-              {/* Manual Button Only */}
-              {fbLoaded && (
-                <button
-                  onClick={launchWhatsAppSignup}
-                  disabled={isLoggingIn}
-                  className="w-full bg-[#1877f2] hover:bg-[#166fe5] text-white font-bold py-3 rounded-lg flex items-center justify-center disabled:opacity-50 transition-colors"
-                >
-                  {isLoggingIn ? (
-                    <>
-                      <svg
-                        className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                      >
-                        <circle
-                          className="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          strokeWidth="4"
-                        />
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                        />
-                      </svg>
-                      Signing in…
-                    </>
-                  ) : (
-                    "Continue with WhatsApp Business"
-                  )}
-                </button>
-              )}
+              {/* Login Button */}
+              <button
+                onClick={launchWhatsAppSignup}
+                disabled={isLoggingIn || !fbLoaded}
+                className="w-full bg-[#1877f2] hover:bg-[#166fe5] text-white font-bold py-4 rounded-lg flex items-center justify-center disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-200 shadow-md"
+              >
+                {isLoggingIn ? (
+                  <>
+                    <svg
+                      className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
+                    </svg>
+                    Signing you in...
+                  </>
+                ) : (
+                  "Continue with WhatsApp Business"
+                )}
+              </button>
 
-              <p className="text-sm text-gray-600 mt-6">
+              <p className="text-sm text-gray-600 mt-6 text-center">
                 Use your Meta account with WhatsApp Business access.
               </p>
             </div>
 
-            {/* RIGHT */}
+            {/* Right Side - Info */}
             <div className="hidden md:block md:col-span-2 bg-blue-50 p-8">
               <div className="h-full flex flex-col justify-between">
                 <div>
@@ -227,8 +221,8 @@ const Login = () => {
 
                 <div className="mt-8">
                   <img
-                    src="https://images.unsplash.com/photo-1516321318423-f06f85e504b3?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w0MzkyNDZ8MHwxfHNlYXJjaHwxfHxidXNpbmVzc3xlbnwwfHx8fDE3MTA3ODIyMTB8MA&ixlib=rb-4.0.3&q=80&w=1080"
-                    alt="Dashboard"
+                    src="https://images.unsplash.com/photo-1516321318423-f06f85e504b3?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080"
+                    alt="Business Dashboard"
                     className="rounded-lg shadow-md object-cover h-48 w-full"
                   />
                 </div>
@@ -242,18 +236,8 @@ const Login = () => {
                     className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-500"
                   >
                     View setup guide
-                    <svg
-                      className="ml-1 w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 5l7 7-7 7"
-                      />
+                    <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                     </svg>
                   </a>
                 </div>
