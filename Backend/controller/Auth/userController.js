@@ -1,132 +1,138 @@
 const axios = require('axios');
-const { generateToken } = require('../../utils/jwt');
 const User = require('../../model/Auth/userModel');
+const { generateToken } = require('../../utils/jwt');
 
-exports.login = async (req, res) => {
+exports.embeddedLogin = async (req, res) => {
+    const { code } = req.body;
+
+    if (!code) {
+        return res.status(400).json({
+            success: false,
+            error: 'Authorization code is required'
+        });
+    }
+
     try {
-        const { code, accessToken } = req.body;
-        if (!code && !accessToken) {
-            return res.status(400).json({ success: false, error: 'No code or access token provided' });
+        // Step 1: Exchange code for System User Access Token
+        const tokenUrl = `https://graph.facebook.com/${process.env.WHATSAPP_API_VERSION}/oauth/access_token`;
+        const tokenResponse = await axios.get(tokenUrl, {
+            params: {
+                client_id: process.env.FACEBOOK_APP_ID,
+                client_secret: process.env.FACEBOOK_APP_SECRET,
+                code,
+            }
+        });
+
+        const systemUserAccessToken = tokenResponse.data.access_token;
+        if (!systemUserAccessToken) {
+            throw new Error('Failed to obtain access token');
         }
 
-        let access_token, expires_in;
-
-        if (code) {
-            // Exchange code for access token (existing flow)
-            const tokenResponse = await axios.get(
-                `https://graph.facebook.com/${process.env.WHATSAPP_API_VERSION}/oauth/access_token`,
-                {
-                    params: {
-                        client_id: process.env.FACEBOOK_APP_ID,
-                        client_secret: process.env.FACEBOOK_APP_SECRET,
-                        code,
-                        redirect_uri: process.env.REDIRECT_URI,
-                    },
-                }
-            );
-            ({ access_token, expires_in } = tokenResponse.data);
-        } else if (accessToken) {
-            // Use provided access token (from FB.getLoginStatus)
-            access_token = accessToken;
-            // Fetch token expiration (optional, as expiresIn may be provided by FB.getLoginStatus)
-            const debugResponse = await axios.get(
-                `https://graph.facebook.com/${process.env.WHATSAPP_API_VERSION}/debug_token`,
-                {
-                    params: {
-                        input_token: accessToken,
-                        access_token: `${process.env.FACEBOOK_APP_ID}|${process.env.FACEBOOK_APP_SECRET}`,
-                    },
-                }
-            );
-            expires_in = debugResponse.data.data.expires_at;
-        }
-
-        // Fetch WABA and phone number details
+        // Step 2: Get user + business accounts
         const meResponse = await axios.get(
             `https://graph.facebook.com/${process.env.WHATSAPP_API_VERSION}/me`,
             {
                 params: {
-                    fields: 'id,email,name,whatsapp_business_accounts',
-                    access_token,
-                },
+                    fields: 'id,name,email,accounts{whatsapp_business_accounts}',
+                    access_token: systemUserAccessToken
+                }
             }
         );
 
-        const { id, email, name, whatsapp_business_accounts } = meResponse.data;
-        if (!whatsapp_business_accounts?.data?.length) {
-            return res.status(400).json({ success: false, error: 'No WhatsApp Business Account found' });
+        const { id: facebookUserId, name, email, accounts } = meResponse.data;
+
+        if (!accounts?.data?.length) {
+            return res.status(400).json({
+                success: false,
+                error: 'No Business Manager found. Please create one.'
+            });
         }
 
-        const waba = whatsapp_business_accounts.data[0];
-        const wabaId = waba.id;
+        const businessAccount = accounts.data[0];
+        const waba = businessAccount.whatsapp_business_accounts?.data?.[0];
 
-        // Fetch phone numbers
+        if (!waba) {
+            return res.status(400).json({
+                success: false,
+                error: 'WhatsApp Business Account not found. Please complete setup in Meta.'
+            });
+        }
+
+        // Step 3: Get Phone Number
         const phoneResponse = await axios.get(
-            `https://graph.facebook.com/${process.env.WHATSAPP_API_VERSION}/${wabaId}/phone_numbers`,
-            {
-                headers: { Authorization: `Bearer ${access_token}` },
-            }
+            `https://graph.facebook.com/${process.env.WHATSAPP_API_VERSION}/${waba.id}/phone_numbers`,
+            { params: { access_token: systemUserAccessToken } }
         );
 
-        const phoneNumber = phoneResponse.data.data[0];
+        const phoneNumber = phoneResponse.data.data?.[0];
         if (!phoneNumber) {
-            return res.status(400).json({ success: false, error: 'No phone number found' });
+            return res.status(400).json({
+                success: false,
+                error: 'No phone number connected. Please link a number in Meta Business Suite.'
+            });
         }
 
-        const phoneNumberId = phoneNumber.id;
-
-        // Check if phone number is registered
-        if (phoneNumber.status !== 'connected') {
+        // Step 4: Auto-subscribe to webhooks
+        try {
             await axios.post(
-                `https://graph.facebook.com/${process.env.WHATSAPP_API_VERSION}/${phoneNumberId}/register`,
-                { messaging_product: 'whatsapp' },
-                { headers: { Authorization: `Bearer ${access_token}` } }
+                `https://graph.facebook.com/${process.env.WHATSAPP_API_VERSION}/${waba.id}/subscribed_apps`,
+                {
+                    subscribed_fields: ['messages', 'message_statuses', 'message_template_status_update']
+                },
+                {
+                    headers: { Authorization: `Bearer ${systemUserAccessToken}` }
+                }
             );
+        } catch (e) {
+            console.log("Webhook already subscribed or minor error (safe to ignore)");
         }
 
-        // Subscribe to webhooks on WABA
-        await axios.post(
-            `https://graph.facebook.com/${process.env.WHATSAPP_API_VERSION}/${wabaId}/subscribed_apps`,
-            {
-                subscribed_fields: ['messages', 'message_template_status_update', 'statuses'],
-            },
-            {
-                headers: { Authorization: `Bearer ${access_token}` },
-            }
-        );
+        // Step 5: Save / Update User
+        let user = await User.findOne({ facebookUserId });
 
-        // Save or update user
-        let user = await User.findOne({ email });
         if (user) {
-            user.waPhoneNumberId = phoneNumberId;
-            user.waBusinessAccountId = wabaId;
-            user.waAccessToken = access_token;
-            user.tokenExpiresAt = expires_in ? new Date(expires_in * 1000) : null;
-            await user.save();
+            user.name = name;
+            user.email = email;
+            user.businessName = businessAccount.name;
+            user.waBusinessAccountId = waba.id;
+            user.waPhoneNumberId = phoneNumber.id;
+            user.waAccessToken = systemUserAccessToken;
         } else {
             user = new User({
+                facebookUserId,
                 name,
                 email,
-                waPhoneNumberId: phoneNumberId,
-                waBusinessAccountId: wabaId,
-                waAccessToken: access_token,
-                tokenExpiresAt: expires_in ? new Date(expires_in * 1000) : null,
+                businessName: businessAccount.name,
+                waBusinessAccountId: waba.id,
+                waPhoneNumberId: phoneNumber.id,
+                waAccessToken: systemUserAccessToken
             });
-            await user.save();
         }
 
-        // Generate JWT
+        await user.save();
+
+        // Step 6: Generate JWT
         const token = generateToken(user._id);
 
-        res.status(200).json({ success: true, token, user });
+        res.json({
+            success: true,
+            token,
+            user: {
+                _id: user._id,
+                name: user.name,
+                email: user.email,
+                businessName: user.businessName,
+                waBusinessAccountId: user.waBusinessAccountId,
+                waPhoneNumberId: user.waPhoneNumberId,
+                hasCompletedOnboarding: true
+            }
+        });
+
     } catch (error) {
-        console.error('Login error:', error);
-        const errorMessage = error.response?.data?.error?.message || 'Failed to authenticate';
-        const errorCode = error.response?.data?.error?.code;
-        let userMessage = errorMessage;
-        if (errorCode === 'invalid_code') {
-            userMessage = 'Invalid or expired authorization code. Please try logging in again.';
-        }
-        res.status(500).json({ success: false, error: userMessage });
+        console.error('Embedded Login Error:', error.response?.data || error.message);
+        res.status(500).json({
+            success: false,
+            error: error.response?.data?.error?.message || 'Login failed. Please try again.'
+        });
     }
 };

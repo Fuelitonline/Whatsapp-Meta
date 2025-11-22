@@ -1,7 +1,8 @@
 const express = require('express');
-const { login } = require('../controller/Auth/userController');
+const { embeddedLogin } = require('../controller/Auth/userController');
+
 const router = express.Router();
 
-router.post('/login', login);
+router.post('/embedded-login', embeddedLogin);
 
 module.exports = router;

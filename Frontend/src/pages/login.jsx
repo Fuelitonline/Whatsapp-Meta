@@ -10,7 +10,7 @@ const Login = () => {
   const [error, setError] = useState(null);
   const navigate = useNavigate();
 
-  // Exchange Code for Token (Main Login Function)
+  // Main Login Function - Exchange Code with Backend
   const exchangeCode = useCallback(
     async (code) => {
       try {
@@ -18,17 +18,14 @@ const Login = () => {
         setError(null);
 
         const { data } = await axios.post(
-          `${import.meta.env.VITE_API_URL}/api/auth/login`,
+          `${import.meta.env.VITE_API_URL}/api/auth/embedded-login`, // Correct Route
           { code },
           { withCredentials: true }
         );
 
         if (data.success) {
-          // Save token & user in localStorage
           localStorage.setItem("token", data.token);
           localStorage.setItem("user", JSON.stringify(data.user || {}));
-
-          // Redirect to dashboard
           navigate("/dashboard", { replace: true });
         } else {
           setError(data.error || "Login failed. Please try again.");
@@ -50,7 +47,6 @@ const Login = () => {
   // Listen for postMessage from Facebook Embedded Signup
   useEffect(() => {
     const handler = (e) => {
-      // Only accept messages from Facebook domains
       if (!e.origin.includes("facebook.com") && !e.origin.includes("fb.com"))
         return;
 
@@ -63,7 +59,7 @@ const Login = () => {
           exchangeCode(data.code);
         }
       } catch {
-        // Ignore malformed messages – no action needed
+        // Ignore invalid messages
       }
     };
 
@@ -83,7 +79,7 @@ const Login = () => {
         appId: import.meta.env.VITE_FACEBOOK_APP_ID,
         cookie: true,
         xfbml: false,
-        version: import.meta.env.VITE_WHATSAPP_API_VERSION || "v23.0",
+        version: import.meta.env.VITE_WHATSAPP_API_VERSION || "v20.0",
       });
       setFbLoaded(true);
     };
@@ -110,7 +106,7 @@ const Login = () => {
     setError(null);
 
     window.FB.login(
-      () => { }, // We don't use the callback — we rely on postMessage
+      () => { }, // We don't use callback → rely on postMessage
       {
         config_id: import.meta.env.VITE_FACEBOOK_CONFIG_ID,
         response_type: "code",
