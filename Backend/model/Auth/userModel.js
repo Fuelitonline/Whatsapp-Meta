@@ -7,7 +7,7 @@ const userSchema = new mongoose.Schema(
     facebookUserId: {
       type: String,
       required: true,
-      unique: true,
+      unique: true, // This already creates an index
     },
     name: String,
     email: String,
@@ -37,7 +37,7 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// Index for faster lookup
-userSchema.index({ facebookUserId: 1 });
+// ❌ REMOVE THIS — It causes duplicate schema index warning
+// userSchema.index({ facebookUserId: 1 });
 
 module.exports = mongoose.model('User', userSchema);
